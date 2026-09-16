@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Times Tables Timed" />
+<title>Times Tables Practice — Timed</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #FBF7EE; overscroll-behavior: none; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  button { -webkit-user-select: none; user-select: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useRef } = React;
+
+const PALETTE = {
+  bg: "#FBF7EE",
+  ink: "#2B2A28",
+  chalkBoard: "#2F4538",
+  chalkBoardLine: "#4A6155",
+  accent: "#E0762E",
+  accentSoft: "#F3D9C4",
+  good: "#3F7B4F",
+  paper: "#FFFFFF",
+};
+
+function randInt(min, max) {
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  return Math.floor(Math.random() * (hi - lo + 1)) + lo;
+}
+
+const OPERATIONS = [
+  { id: "multiply", symbol: "\u00d7", label: "Multiply" },
+  { id: "divide", symbol: "\u00f7", label: "Divide" },
+  { id: "add", symbol: "+", label: "Add" },
+  { id: "subtract", symbol: "\u2212", label: "Subtract" },
+];
+
+function opLabel(id) {
+  const found = OPERATIONS.find((o) => o.id === id);
+  return found ? found.label : id;
+}
+
+function makeProblem(operation, min1, max1, min2, max2) {
+  if (operation === "add") {
+    const a = randInt(min1, max1);
+    const b = randInt(min2, max2);
+    return { a, b, symbol: "+", answer: a + b, key: Math.random() };
+  }
+  if (operation === "subtract") {
+    let x = randInt(min1, max1);
+    let y = randInt(min2, max2);
+    let a = Math.max(x, y);
+    let b = Math.min(x, y);
+    if (a === b) a = a + 1;
+    return { a, b, symbol: "\u2212", answer: a - b, key: Math.random() };
+  }
+  if (operation === "divide") {
+    let divisor = randInt(min2, max2);
+    if (divisor === 0) divisor = 1;
+    const quotient = randInt(min1, max1);
+    const dividend = divisor * quotient;
+    return { a: dividend, b: divisor, symbol: "\u00f7", answer: quotient, key: Math.random() };
+  }
+  const a = randInt(min1, max1);
+  const b = randInt(min2, max2);
+  return { a, b, symbol: "\u00d7", answer: a * b, key: Math.random() };
+}
+
+function formatTime(totalSeconds) {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function NumberField({ label, value, onChange, min = 0, max = 20 }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 14, color: PALETTE.ink }}>
+      <span>{label}</span>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{
+          fontFamily: "inherit",
+          fontSize: 18,
+          padding: "8px 10px",
+          borderRadius: 8,
+          border: `1.5px solid ${PALETTE.accentSoft}`,
+          width: 90,
+          background: PALETTE.paper,
+          color: PALETTE.ink,
+        }}
+      />
+    </label>
+  );
+}
+
+function OperationPicker({ value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 22, flexWrap: "wrap" }}>
+      {OPERATIONS.map((op) => {
+        const active = value === op.id;
+        return (
+          <button
+            key={op.id}
+            onClick={() => onChange(op.id)}
+            style={{
+              flex: "1 1 auto",
+              minWidth: 74,
+              padding: "12px 8px",
+              borderRadius: 10,
+              border: `1.5px solid ${active ? PALETTE.accent : PALETTE.accentSoft}`,
+              background: active ? PALETTE.accent : PALETTE.paper,
+              color: active ? "#fff" : PALETTE.ink,
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 2,
+            }}
+          >
+            <span style={{ fontSize: 20 }}>{op.symbol}</span>
+            <span style={{ fontSize: 12 }}>{op.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SettingsScreen({ settings, setSettings, onStart }) {
+  const { operation, min1, max1, min2, max2, target } = settings;
+  const invalid = min1 > max1 || min2 > max2 || target < 1;
+
+  const labels =
+    operation === "divide"
+      ? { first: "Quotient (answer)", second: "Divisor" }
+      : operation === "subtract"
+      ? { first: "First number", second: "Second number" }
+      : operation === "add"
+      ? { first: "First addend", second: "Second addend" }
+      : { first: "First factor", second: "Second factor" };
+
+  return (
+    <div
+      style={{
+        maxWidth: 480,
+        margin: "0 auto",
+        padding: "40px 28px",
+        fontFamily: "'Nunito', 'Segoe UI', sans-serif",
+        color: PALETTE.ink,
+      }}
+    >
+      <h1 style={{ fontSize: 30, fontWeight: 800, margin: "0 0 4px" }}>Times Tables — Timed</h1>
+      <p style={{ fontSize: 15, color: "#6b6a67", margin: "0 0 20px" }}>
+        Choose an operation, set the ranges, and how many correct answers your child needs to finish.
+      </p>
+
+      <OperationPicker
+        value={operation}
+        onChange={(op) => setSettings((s) => ({ ...s, operation: op }))}
+      />
+
+      <div
+        style={{
+          background: PALETTE.paper,
+          borderRadius: 16,
+          padding: 24,
+          boxShadow: "0 2px 0 rgba(0,0,0,0.04)",
+          border: `1px solid ${PALETTE.accentSoft}`,
+        }}
+      >
+        <div style={{ display: "flex", gap: 24, marginBottom: 20, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 10 }}>{labels.first}</div>
+            <div style={{ display: "flex", gap: 14 }}>
+              <NumberField label="From" value={min1} onChange={(v) => setSettings((s) => ({ ...s, min1: v }))} />
+              <NumberField label="To" value={max1} onChange={(v) => setSettings((s) => ({ ...s, max1: v }))} />
+            </div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 10 }}>{labels.second}</div>
+            <div style={{ display: "flex", gap: 14 }}>
+              <NumberField label="From" value={min2} onChange={(v) => setSettings((s) => ({ ...s, min2: v }))} />
+              <NumberField label="To" value={max2} onChange={(v) => setSettings((s) => ({ ...s, max2: v }))} />
+            </div>
+          </div>
+        </div>
+
+        {operation === "divide" && (
+          <p style={{ fontSize: 13, color: "#6b6a67", margin: "-8px 0 18px" }}>
+            Problems are built so the answer is always a whole number (dividend ÷ divisor = quotient).
+          </p>
+        )}
+        {operation === "subtract" && (
+          <p style={{ fontSize: 13, color: "#6b6a67", margin: "-8px 0 18px" }}>
+            The larger number is always shown first, so answers are always positive.
+          </p>
+        )}
+
+        <div style={{ marginBottom: 8 }}>
+          <NumberField
+            label="Correct answers to finish"
+            value={target}
+            min={1}
+            max={200}
+            onChange={(v) => setSettings((s) => ({ ...s, target: v }))}
+          />
+        </div>
+
+        {invalid && (
+          <p style={{ color: PALETTE.accent, fontSize: 13, marginTop: 12 }}>
+            Check that "From" is not greater than "To", and correct answers is at least 1.
+          </p>
+        )}
+      </div>
+
+      <button
+        disabled={invalid}
+        onClick={onStart}
+        style={{
+          marginTop: 24,
+          width: "100%",
+          padding: "16px 0",
+          fontSize: 18,
+          fontWeight: 800,
+          borderRadius: 12,
+          border: "none",
+          background: invalid ? "#d8d5cd" : PALETTE.accent,
+          color: invalid ? "#8b897f" : "#fff",
+          cursor: invalid ? "not-allowed" : "pointer",
+        }}
+      >
+        Start practice
+      </button>
+    </div>
+  );
+}
+
+function keyStyle(bg) {
+  return {
+    width: 76,
+    height: 60,
+    fontSize: 26,
+    fontWeight: 700,
+    borderRadius: 12,
+    border: "none",
+    background: bg,
+    color: "#F5F1E6",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+}
+
+function BackspaceIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+      <path d="M9 5h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-6-7 6-7z" stroke="#F5F1E6" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M13 10l5 5M18 10l-5 5" stroke="#F5F1E6" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function EnterIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+      <path d="M20 6L9 17l-5-5" stroke="#F5F1E6" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CheckIcon({ color = "#7FBF9E" }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+      <path d="M20 6L9 17l-5-5" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function Keypad({ onDigit, onBackspace, onEnter }) {
+  const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "back", "0", "enter"];
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 76px)", gap: 12, marginTop: 32 }}>
+      {keys.map((k) => {
+        if (k === "back") {
+          return (
+            <button key={k} onClick={onBackspace} aria-label="Backspace" style={keyStyle("#3B5346")}>
+              <BackspaceIcon />
+            </button>
+          );
+        }
+        if (k === "enter") {
+          return (
+            <button key={k} onClick={onEnter} aria-label="Check answer" style={keyStyle(PALETTE.accent)}>
+              <EnterIcon />
+            </button>
+          );
+        }
+        return (
+          <button key={k} onClick={() => onDigit(k)} style={keyStyle("#3B5346")}>
+            {k}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function QuizScreen({ settings, onFinish }) {
+  const { operation, min1, max1, min2, max2, target } = settings;
+  const [problem, setProblem] = useState(() => makeProblem(operation, min1, max1, min2, max2));
+  const [input, setInput] = useState("");
+  const [correctCount, setCorrectCount] = useState(0);
+  const [shake, setShake] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const submit = useCallback(() => {
+    if (input === "") return;
+    if (Number(input) === problem.answer) {
+      const next = correctCount + 1;
+      if (next >= target) {
+        const finalSeconds = Math.floor((Date.now() - startRef.current) / 1000);
+        onFinish(finalSeconds);
+        return;
+      }
+      setCorrectCount(next);
+      setInput("");
+      setProblem(makeProblem(operation, min1, max1, min2, max2));
+    } else {
+      setShake(true);
+      setTimeout(() => setShake(false), 300);
+      setInput("");
+    }
+  }, [input, problem, correctCount, target, operation, min1, max1, min2, max2, onFinish]);
+
+  const addDigit = (d) => setInput((cur) => (cur.length >= 4 ? cur : cur + d));
+  const backspace = () => setInput((cur) => cur.slice(0, -1));
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key >= "0" && e.key <= "9") addDigit(e.key);
+      else if (e.key === "Backspace") backspace();
+      else if (e.key === "Enter") submit();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [submit]);
+
+  const progressPct = Math.min(100, Math.round((correctCount / target) * 100));
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: PALETTE.chalkBoard,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'Nunito', 'Segoe UI', sans-serif",
+        position: "relative",
+      }}
+    >
+      <style>{`
+        .top-bar {
+          position: absolute; top: 20px; left: 24px; right: 24px;
+          display: flex; align-items: center; justify-content: space-between;
+          color: #DCE7E0; font-size: 15px; gap: 12px;
+        }
+        .progress-track {
+          position: absolute; top: 56px; left: 24px; right: 24px;
+          height: 10px; border-radius: 6px; background: rgba(255,255,255,0.12); overflow: hidden;
+        }
+        .progress-fill {
+          height: 100%; background: #E0762E; border-radius: 6px;
+          transition: width 0.3s ease;
+        }
+        .problem-row { display: flex; align-items: center; gap: 22px; }
+        .problem-num { font-size: 76px; font-weight: 800; color: #F5F1E6; }
+        .problem-op { font-size: 60px; font-weight: 700; }
+        .answer-box {
+          width: 140px; font-size: 60px; font-weight: 800; text-align: center;
+          color: #F5F1E6; min-height: 84px;
+        }
+        @media (max-width: 480px) {
+          .problem-row { flex-wrap: wrap; justify-content: center; gap: 10px; max-width: 300px; }
+          .problem-num { font-size: 52px; }
+          .problem-op { font-size: 40px; }
+          .answer-box { font-size: 44px; width: 110px; min-height: 60px; }
+        }
+      `}</style>
+
+      <div className="top-bar">
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>⏱ {formatTime(elapsed)}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <CheckIcon />
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>{correctCount} / {target}</span>
+        </span>
+      </div>
+      <div className="progress-track">
+        <div className="progress-fill" style={{ width: `${progressPct}%` }} />
+      </div>
+
+      <div
+        className="problem-row"
+        style={{ transform: shake ? "translateX(-6px)" : "translateX(0)", transition: "transform 0.08s" }}
+      >
+        <span className="problem-num">{problem.a}</span>
+        <span className="problem-op" style={{ color: PALETTE.accent }}>{problem.symbol}</span>
+        <span className="problem-num">{problem.b}</span>
+        <span className="problem-op" style={{ color: "#8FA79A" }}>=</span>
+        <div className="answer-box" style={{ borderBottom: `4px solid ${shake ? "#D9534F" : PALETTE.accent}` }}>
+          {input}
+        </div>
+      </div>
+
+      <Keypad onDigit={addDigit} onBackspace={backspace} onEnter={submit} />
+    </div>
+  );
+}
+
+function ConfettiPiece({ delay, left, color, rotate }) {
+  return (
+    <div
+      style={{
+        position: "absolute", top: -20, left: `${left}%`, width: 10, height: 16,
+        background: color, borderRadius: 2,
+        animation: `fall 2.6s ease-in ${delay}s forwards`,
+        transform: `rotate(${rotate}deg)`,
+      }}
+    />
+  );
+}
+
+function ResultsScreen({ settings, elapsedSeconds, onRestart }) {
+  const [copied, setCopied] = useState(false);
+  const canShare = typeof navigator !== "undefined" && !!navigator.share;
+  const colors = [PALETTE.accent, "#E0B93B", "#3F7B4F", "#5B8FBF", "#C4577E"];
+  const pieces = Array.from({ length: 40 }, (_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    delay: Math.random() * 0.6,
+    color: colors[i % colors.length],
+    rotate: Math.random() * 180,
+  }));
+
+  const rangeLabel = (min, max) => `${Math.min(min, max)}–${Math.max(min, max)}`;
+
+  const summary =
+    `Times Tables Practice — Results\n` +
+    `Operation: ${opLabel(settings.operation)}\n` +
+    `Range 1: ${rangeLabel(settings.min1, settings.max1)}\n` +
+    `Range 2: ${rangeLabel(settings.min2, settings.max2)}\n` +
+    `Correct answers: ${settings.target}\n` +
+    `Time: ${formatTime(elapsedSeconds)}`;
+
+  const doCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(summary);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = summary;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    }
+  };
+
+  const doShare = async () => {
+    try {
+      await navigator.share({ title: "Times Tables Results", text: summary });
+    } catch (e) {
+      // user cancelled share sheet or it failed silently; no action needed
+    }
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: PALETTE.bg,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "'Nunito', 'Segoe UI', sans-serif",
+        position: "relative",
+        overflow: "hidden",
+        textAlign: "center",
+        padding: 24,
+      }}
+    >
+      <style>{`
+        @keyframes fall { to { transform: translateY(110vh) rotate(360deg); opacity: 0.9; } }
+        @keyframes pop {
+          0% { transform: scale(0.7); opacity: 0; }
+          60% { transform: scale(1.06); opacity: 1; }
+          100% { transform: scale(1); }
+        }
+      `}</style>
+      {pieces.map((p) => (
+        <ConfettiPiece key={p.id} {...p} />
+      ))}
+      <div style={{ animation: "pop 0.5s ease-out", maxWidth: 420, width: "100%" }}>
+        <div style={{ fontSize: 64, marginBottom: 8 }}>🎉</div>
+        <h1 style={{ fontSize: 34, fontWeight: 800, color: PALETTE.ink, margin: "0 0 4px" }}>Great job!</h1>
+        <p style={{ fontSize: 18, color: "#6b6a67", margin: "0 0 24px" }}>
+          {settings.target} correct in {formatTime(elapsedSeconds)}
+        </p>
+
+        <div
+          style={{
+            background: PALETTE.paper,
+            border: `1px solid ${PALETTE.accentSoft}`,
+            borderRadius: 12,
+            padding: 16,
+            textAlign: "left",
+            fontFamily: "monospace",
+            fontSize: 13.5,
+            color: PALETTE.ink,
+            whiteSpace: "pre-wrap",
+            marginBottom: 16,
+          }}
+        >
+          {summary}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+          <button
+            onClick={doCopy}
+            style={{
+              flex: 1,
+              padding: "12px 0",
+              fontSize: 15,
+              fontWeight: 700,
+              borderRadius: 10,
+              border: `1.5px solid ${PALETTE.accent}`,
+              background: copied ? PALETTE.accent : PALETTE.paper,
+              color: copied ? "#fff" : PALETTE.accent,
+              cursor: "pointer",
+            }}
+          >
+            {copied ? "Copied!" : "Copy text"}
+          </button>
+          {canShare && (
+            <button
+              onClick={doShare}
+              style={{
+                flex: 1,
+                padding: "12px 0",
+                fontSize: 15,
+                fontWeight: 700,
+                borderRadius: 10,
+                border: "none",
+                background: PALETTE.accent,
+                color: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              Share
+            </button>
+          )}
+        </div>
+
+        <button
+          onClick={onRestart}
+          style={{
+            padding: "14px 28px",
+            fontSize: 17,
+            fontWeight: 800,
+            borderRadius: 12,
+            border: "none",
+            background: PALETTE.ink,
+            color: "#fff",
+            cursor: "pointer",
+            width: "100%",
+          }}
+        >
+          Practice again
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [stage, setStage] = useState("settings"); // settings | quiz | done
+  const [settings, setSettings] = useState({
+    operation: "multiply",
+    min1: 1,
+    max1: 12,
+    min2: 1,
+    max2: 12,
+    target: 10,
+  });
+  const [finalTime, setFinalTime] = useState(0);
+
+  return (
+    <div style={{ minHeight: "100vh", background: PALETTE.bg }}>
+      {stage === "settings" && (
+        <SettingsScreen settings={settings} setSettings={setSettings} onStart={() => setStage("quiz")} />
+      )}
+      {stage === "quiz" && (
+        <QuizScreen
+          settings={settings}
+          onFinish={(seconds) => {
+            setFinalTime(seconds);
+            setStage("done");
+          }}
+        />
+      )}
+      {stage === "done" && (
+        <ResultsScreen settings={settings} elapsedSeconds={finalTime} onRestart={() => setStage("settings")} />
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
